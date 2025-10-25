@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLoadScript, GoogleMap, Marker, DirectionsRenderer } from "@react-google-maps/api";
+import { useLoadScript, GoogleMap, Marker } from "@react-google-maps/api";
 import { useQuery } from "@tanstack/react-query";
 
 export default function MapPage() {
@@ -309,12 +309,6 @@ export default function MapPage() {
     return map;
   }, [visibleMarkers]);
 
-  // Routing & selection state
-  const [selectedMode, setSelectedMode] = useState<"WALKING" | "DRIVING">("WALKING");
-  const [bestMarker, setBestMarker] = useState<any | null>(null);
-  const [directionsResults, setDirectionsResults] = useState<Record<string, google.maps.DirectionsResult | null>>({ WALKING: null, DRIVING: null });
-  const [showDetails, setShowDetails] = useState(false);
-
   // badge helper
   function badgeInfo(current: number, capacity: number) {
     if (capacity <= 0) return { text: "Unknown", color: "gray" };
@@ -324,126 +318,9 @@ export default function MapPage() {
     return { text: "Suitable", color: "#22c55e" }; // green
   }
 
-  // Helpers: protection level
-  function protectionLevelCategory(raw: any) {
-    const k = (raw?.Rodzaj_obi || "").toString().toLowerCase();
-    if (/schron|\(s\)/i.test(k)) return { level: "L3", label: "High" };
-    if (/ukry|\(u\)/i.test(k)) return { level: "L2", label: "Medium" };
-    if (/mds/i.test(k)) return { level: "L1", label: "Low" };
-    return { level: "L1", label: "Low" };
-  }
-
-  // Promise wrapper for DirectionsService.route
-  function routePromise(origin: google.maps.LatLngLiteral, dest: google.maps.LatLngLiteral, travelMode: google.maps.TravelMode) {
-    return new Promise<google.maps.DirectionsResult>((resolve, reject) => {
-      const service = new google.maps.DirectionsService();
-      service.route(
-        {
-          origin,
-          destination: dest,
-          travelMode,
-        },
-        (result, status) => {
-          if (status === "OK" && result) resolve(result);
-          else reject(new Error(`Directions request failed: ${status}`));
-        }
-      );
-    });
-  }
-
-  // Find best shelter considering route time, availability and qualityScore
-  const findBestShelter = useCallback(async () => {
-    if (!visibleMarkers || visibleMarkers.length === 0) return;
-    const origin = center;
-    const candidates = visibleMarkers.filter((m) => {
-      const cap = Number(m.capacity) || 0;
-      const current = currentPeopleMap[m.id] ?? 0;
-      return cap > 0 && current < cap; // exclude full
-    });
-    if (candidates.length === 0) {
-      setBestMarker(null);
-      return;
-    }
-
-    // compute directions for each candidate for both modes (best-effort, fall back to distance estimate)
-    const entries: Array<{ marker: any; walkingSec: number | null; drivingSec: number | null; qualityScore?: number }>
-      = [];
-    for (const m of candidates) {
-      let walkSec: number | null = null;
-      let driveSec: number | null = null;
-      try {
-        const walkRes = await routePromise(origin, m.position, google.maps.TravelMode.WALKING);
-        walkSec = walkRes.routes[0].legs.reduce((s, leg: any) => s + (leg.duration?.value || 0), 0);
-        // cache walking result
-        setDirectionsResults((prev) => ({ ...prev, WALKING: walkRes }));
-      } catch (e) {
-        walkSec = Math.round(haversineDistance(origin, m.position) / (5000 / 3600));
-      }
-      try {
-        const driveRes = await routePromise(origin, m.position, google.maps.TravelMode.DRIVING);
-        driveSec = driveRes.routes[0].legs.reduce((s, leg: any) => s + (leg.duration?.value || 0), 0);
-        setDirectionsResults((prev) => ({ ...prev, DRIVING: driveRes }));
-      } catch (e) {
-        driveSec = Math.round(haversineDistance(origin, m.position) / (50000 / 3600));
-      }
-      entries.push({ marker: m, walkingSec: walkSec, drivingSec: driveSec, qualityScore: (m.qualityScore ?? 0) });
-    }
-
-    // choose best by combining availability, normalized duration and qualityScore for currently selected mode
-    const mode = selectedMode;
-    const durValues = entries.map((e) => (mode === "WALKING" ? e.walkingSec ?? 0 : e.drivingSec ?? 0));
-    const maxDur = Math.max(...durValues, 1);
-    let best: any = null;
-    let bestScore = -Infinity;
-    for (const e of entries) {
-      const cap = Number(e.marker.capacity) || 0;
-      const current = currentPeopleMap[e.marker.id] ?? 0;
-      const availability = cap > 0 ? (cap - current) / cap : 0;
-      const dur = mode === "WALKING" ? (e.walkingSec ?? maxDur) : (e.drivingSec ?? maxDur);
-      const durNorm = dur / maxDur;
-      const score = 0.5 * availability + 0.35 * (e.qualityScore || 0) - 0.15 * durNorm;
-      if (score > bestScore) {
-        bestScore = score;
-        best = { marker: e.marker, duration: dur, score };
-      }
-    }
-
-    if (best) {
-      setBestMarker(best.marker);
-      // ensure we have the directions result for the chosen mode
-      try {
-        const result = await routePromise(origin, best.marker.position, mode === "WALKING" ? google.maps.TravelMode.WALKING : google.maps.TravelMode.DRIVING);
-        setDirectionsResults((prev) => ({ ...prev, [mode]: result }));
-      } catch (e) {
-        // ignore
-      }
-      setShowDetails(true);
-    }
-  }, [visibleMarkers, center, currentPeopleMap, selectedMode]);
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ width: "100%", height: "60vh", position: "relative" }}>
-        <div style={{ position: "absolute", zIndex: 10, left: 12, top: 12, display: "flex", gap: 8 }}>
-          <button onClick={() => findBestShelter()} style={{ padding: "8px 12px" }}>
-            Find safe shelter
-          </button>
-          <div style={{ display: "flex", background: "white", borderRadius: 6, overflow: "hidden" }}>
-            <button
-              onClick={() => setSelectedMode("WALKING")}
-              style={{ padding: "8px 10px", background: selectedMode === "WALKING" ? "#eef" : "transparent" }}
-            >
-              Walking
-            </button>
-            <button
-              onClick={() => setSelectedMode("DRIVING")}
-              style={{ padding: "8px 10px", background: selectedMode === "DRIVING" ? "#eef" : "transparent" }}
-            >
-              Driving
-            </button>
-          </div>
-        </div>
-
+      <div style={{ width: "100%", height: "60vh" }}>
         {loadErrorFlag ? (
           <div style={{ padding: 20 }}>Map load error</div>
         ) : loadingFlag ? (
@@ -485,58 +362,7 @@ export default function MapPage() {
 
               return <Marker key={m.id} position={m.position} icon={icon} />;
             })}
-
-            {/* Render selected directions */}
-            {directionsResults[selectedMode] ? (
-              <DirectionsRenderer directions={directionsResults[selectedMode] as google.maps.DirectionsResult} />
-            ) : null}
           </GoogleMap>
-        )}
-      </div>
-
-      {/* Route/communicate panel */}
-      <div style={{ padding: 12, borderTop: "1px solid #eee", background: "#fafafa" }}>
-        {directionsResults[selectedMode] || bestMarker ? (
-          (() => {
-            const dir = directionsResults[selectedMode];
-            const leg = dir?.routes?.[0]?.legs?.[0];
-            const steps: any[] = leg?.steps ?? [];
-            const currentInstr = steps[0]?.instructions ? steps[0].instructions.replace(/<[^>]*>/g, "") : "";
-            const nextInstr = steps[1]?.instructions ? steps[1].instructions.replace(/<[^>]*>/g, "") : "";
-            const durationSec = leg?.duration?.value ?? null;
-            const etaColor = durationSec == null ? "gray" : durationSec <= 600 ? "#22c55e" : durationSec <= 1800 ? "#ff8c00" : "#e02424";
-            const best = bestMarker ?? (visibleMarkers && visibleMarkers.length ? visibleMarkers[0] : null);
-            const capacity = Number(best?.capacity) || (best?.raw && Number(best.raw['Pojemnoś_'] ?? best.raw.Pojemnosc ?? best.raw.POJEMNOSC)) || 0;
-            const currentCount = currentPeopleMap[best?.id] ?? 0;
-            const prot = protectionLevelCategory(best?.raw ?? {});
-
-            return (
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 18, fontWeight: 700 }}>{currentInstr || "No route instruction"}</div>
-                  <div style={{ color: "#666", fontSize: 13, marginTop: 6 }}>{nextInstr ? `Then: ${nextInstr}` : ""}</div>
-                </div>
-                <div style={{ width: 160, textAlign: "right" }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: etaColor }}>{durationSec ? `${Math.ceil(durationSec / 60)} min` : "—"}</div>
-                  <div style={{ marginTop: 8 }}>
-                    <button onClick={() => setShowDetails((s) => !s)} style={{ padding: "6px 10px" }}>
-                      {showDetails ? "Hide details" : "Details"}
-                    </button>
-                  </div>
-                </div>
-                {showDetails ? (
-                  <div style={{ width: "100%", marginTop: 12, padding: 12, background: "white", borderRadius: 8 }}>
-                    <div style={{ fontWeight: 700 }}>Closest safe place to you</div>
-                    <div style={{ marginTop: 6 }}>{best?.raw?.Nazwa || best?.raw?.Name || best?.raw?.Adres || "Unnamed"}</div>
-                    <div style={{ marginTop: 8 }}>Available places: {currentCount}/{capacity}</div>
-                    <div style={{ marginTop: 6 }}>Protection level: {prot.level} - {prot.label}</div>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })()
-        ) : (
-          <div style={{ color: "#666" }}>No active route — click "Find safe shelter" to calculate routes.</div>
         )}
       </div>
 
