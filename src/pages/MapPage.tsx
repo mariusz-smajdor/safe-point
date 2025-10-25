@@ -6,9 +6,6 @@ export default function MapPage() {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   const { isLoaded, loadError } = useLoadScript({ googleMapsApiKey: apiKey });
 
-  // Do not early-return here — hooks below must run on every render to preserve hook order.
-
-  // Map refs and state
   const mapRef = useRef<google.maps.Map | null>(null);
   const [center, setCenter] = useState<{ lat: number; lng: number }>(() => {
     try {
@@ -197,14 +194,10 @@ export default function MapPage() {
       else if (/ukry|\(u\)/i.test(kindLower)) typeScore = 0.85;
       else if (/mds/i.test(kindLower)) typeScore = 0.7;
 
-      // basement bonus
       const basementKeywords = /\b(piwn|podziem|podziemny|podziemie|parking|gara[żz])\b/i;
       const basementBonus = basementKeywords.test((attrs.Adres || "") + " " + (attrs.Rodzaj_inw || "")) ? 0.08 : 0;
 
-      // capacity normalized (assume 200 is large); capScore in [0,1]
       const capScore = Math.min(capacity / 200, 1);
-
-      // final score (weights chosen to favor explicit types but still value capacity)
       const score = 0.6 * typeScore + 0.35 * capScore + basementBonus;
       return score;
     }
@@ -215,19 +208,16 @@ export default function MapPage() {
     try {
       localStorage.setItem(CACHE_KEY_MARKERS, JSON.stringify(byQuality));
     } catch (e) {
-      /* ignore */
     }
 
     return byQuality;
   }, [arcgisQuery.data, mercatorToLatLng]);
 
-  // If we don't have fresh data, load cached markers into state
   const [visibleMarkers, setVisibleMarkers] = useState<any[]>(() => {
     try {
       const raw = localStorage.getItem(CACHE_KEY_MARKERS);
       if (raw) return JSON.parse(raw);
     } catch (e) {
-      /* ignore */
     }
     return [];
   });
@@ -236,35 +226,25 @@ export default function MapPage() {
     if (markers && markers.length > 0) setVisibleMarkers(markers);
   }, [markers]);
 
-  // Debounced logger: show Rodzaj_obi of every feature/marker
   useEffect(() => {
     let t = 0 as unknown as number;
     t = window.setTimeout(() => {
       try {
         const raw: any = arcgisQuery.data;
         if (raw && Array.isArray(raw.features) && raw.features.length > 0) {
-          // extract Rodzaj_obi from each feature (include nulls for transparency)
           void raw.features.map((f: any) => f?.attributes?.Rodzaj_obi ?? null);
         } else if (visibleMarkers && visibleMarkers.length > 0) {
-          // fallback: extract from visibleMarkers' raw attrs
           void visibleMarkers.map((m: any) => m.raw?.Rodzaj_obi ?? null);
-        } else {
-          // logging removed per request
-        }
+        } 
       } catch (e) {
-        // ignore logging errors
       }
     }, 2000);
     return () => window.clearTimeout(t);
   }, [arcgisQuery.data, visibleMarkers]);
 
-  // Do not early-return; render loading/error UI inside the JSX so hook order is stable
   const loadErrorFlag = !!loadError;
   const loadingFlag = !isLoaded;
 
-  // If cached center exists and no network, center will be from localStorage initial state
-
-  // distance helper (meters)
   function haversineDistance(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
     const toRad = (v: number) => (v * Math.PI) / 180;
     const R = 6371000; // meters
@@ -293,8 +273,6 @@ export default function MapPage() {
     const toMin = (s: number) => Math.max(1, Math.round(s / 60));
     return { walkMin: toMin(walkSec), driveMin: toMin(driveSec) };
   }
-
-  // generate a stable-ish random currentPeople per marker id (memoized)
   const currentPeopleMap = useMemo(() => {
     const map: Record<string | number, number> = {};
     visibleMarkers.forEach((m) => {
@@ -309,7 +287,6 @@ export default function MapPage() {
     return map;
   }, [visibleMarkers]);
 
-  // badge helper
   function badgeInfo(current: number, capacity: number) {
     if (capacity <= 0) return { text: "Unknown", color: "gray" };
     const p = current / capacity;
@@ -344,7 +321,6 @@ export default function MapPage() {
             {visibleMarkers.map((m) => {
               const rodzajRaw = (m.raw?.Rodzaj_obi ?? "").toString();
               const rodzaj = rodzajRaw.toLowerCase();
-              // try numeric code like "[1]"
               const codeMatch = rodzajRaw.match(/\[\s*(\d+)\s*\]/);
               let icon = "/blue-marker.png";
               if (codeMatch) {

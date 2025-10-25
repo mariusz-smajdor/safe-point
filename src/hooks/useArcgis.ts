@@ -23,17 +23,14 @@ export default function useArcgis(url: string = DEFAULT_QUERY_URL) {
   const tryGetCoords = (f: any): Coords | null => {
     if (!f) return null;
 
-    // geometry.x / geometry.y
     if (f.geometry && typeof f.geometry.x === "number" && typeof f.geometry.y === "number") {
       return { x: f.geometry.x, y: f.geometry.y };
     }
 
-    // top-level x/y
     if (typeof f.x === "number" && typeof f.y === "number") {
       return { x: f.x, y: f.y };
     }
 
-    // attributes with coordinate-like field names
     const attrs = f.attributes || {};
     const findKey = (keys: string[]) => {
       for (const k of keys) {
@@ -51,16 +48,12 @@ export default function useArcgis(url: string = DEFAULT_QUERY_URL) {
       const y = Number(attrs[yKey]);
       if (!Number.isNaN(x) && !Number.isNaN(y)) return { x, y };
     }
-
-    // GeoJSON-like geometry
     if (f.geometry && Array.isArray((f.geometry as any).coordinates)) {
       const coords = (f.geometry as any).coordinates;
       if (typeof coords[0] === "number" && typeof coords[1] === "number") {
         return { x: coords[0], y: coords[1] };
       }
     }
-
-    // nested points / rings / paths
     if (f.geometry) {
       const g: any = f.geometry;
       if (Array.isArray(g.points) && Array.isArray(g.points[0]) && typeof g.points[0][0] === "number") {
@@ -82,12 +75,9 @@ export default function useArcgis(url: string = DEFAULT_QUERY_URL) {
   useEffect(() => {
     if (isLoading) return;
     if (error) {
-      // eslint-disable-next-line no-console
       console.error("ArcGIS fetch error:", error);
       return;
     }
-
-    // logging removed per request
   }, [withCoords, error, isLoading]);
 
   return { data, withCoords, isLoading, error } as const;

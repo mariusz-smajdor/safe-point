@@ -32,10 +32,8 @@ function haversineDistance(a: { lat: number; lng: number }, b: { lat: number; ln
   return R * c;
 }
 
-// build a human-friendly shelter name from API attributes
 function getShelterDisplayName(raw: Record<string, any> | undefined | null) {
   if (!raw) return "-";
-  // try many possible name fields
   const nameFields = [
     "Nazwa",
     "NAZWA",
@@ -55,13 +53,11 @@ function getShelterDisplayName(raw: Record<string, any> | undefined | null) {
     }
   }
 
-  // fallback to address-like fields
   if (!name) {
     const addr = raw?.Adres || raw?.Ulica || raw?.Address || raw?.adres || null;
     if (addr && typeof addr === "string" && addr.trim().length > 0) name = addr.trim();
   }
 
-  // determine a short type/level prefix from Rodzaj_obi or similar
   const kindRaw = (raw?.Rodzaj_obi || raw?.Rodzaj || "").toString();
   let prefix = "Schron";
   let level = "";
@@ -92,11 +88,9 @@ function getShelterDisplayName(raw: Record<string, any> | undefined | null) {
     }
   }
 
-  // compose final label
   const parts: string[] = [];
   if (prefix) parts.push(prefix + (level ? ` ${level}` : ""));
   if (name) parts.push(name);
-  // if nothing else, try raw.Rodzaj_obi as last resort
   if (parts.length === 0 && kindRaw) parts.push(kindRaw);
   return parts.join(" - ");
 }
@@ -106,7 +100,6 @@ function stripHtml(s = "") {
 }
 
 function buildOsrmInstruction(step: any) {
-  // basic human-friendly instruction from OSRM step
   const mv = step.maneuver || {};
   const type = (mv.type || "").toString();
   const modifier = (mv.modifier || "").toString();
@@ -121,11 +114,9 @@ function buildOsrmInstruction(step: any) {
   if (type === "roundabout") return `Enter roundabout${name ? `, ${name}` : ""}`;
   if (type === "merge") return `Merge${name ? ` onto ${name}` : ""}`;
   if (type === "on ramp" || type === "off ramp") return `${type}${name ? ` ${name}` : ""}`;
-  // fallback
   return name || (step.ref ? `Follow ${step.ref}` : "Continue");
 }
 
-// localStorage cache keys
 const CACHE_USERPOS_KEY = 'nav:userPos';
 const CACHE_CAND_KEY = 'nav:candidates';
 const CACHE_BEST_KEY = 'nav:best';
@@ -143,7 +134,6 @@ function saveCached<T>(k: string, v: T) {
   try {
     localStorage.setItem(k, JSON.stringify(v));
   } catch (e) {
-    // ignore
   }
 }
 
@@ -158,7 +148,6 @@ export default function NavigatePage() {
   const [mode, setMode] = useState<'WALKING' | 'DRIVING'>('WALKING');
   const [directions, setDirections] = useState<any | null>(null);
 
-  // get user location
   useEffect(() => {
     const cached = loadCached<{ lat: number; lng: number }>(CACHE_USERPOS_KEY);
     // if offline and we have a cached position, use it
@@ -177,7 +166,7 @@ export default function NavigatePage() {
       (pos) => {
         const p = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setUserPos(p);
-        try { saveCached(CACHE_USERPOS_KEY, p); } catch (e) { /* ignore */ }
+        try { saveCached(CACHE_USERPOS_KEY, p); } catch (e) {}
       },
       () => {
         if (cached) setUserPos(cached);
@@ -187,17 +176,14 @@ export default function NavigatePage() {
     );
   }, []);
 
-  // fetch shelters around user
   useEffect(() => {
     if (!userPos) return;
-    // if offline, try to load cached candidates
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       const cached = loadCached<any[]>(CACHE_CAND_KEY);
       if (cached && cached.length > 0) {
         setCandidates(cached);
         return;
       }
-      // no cache -> keep candidates empty
       setCandidates([]);
       return;
     }
@@ -255,7 +241,6 @@ export default function NavigatePage() {
       });
   }, [userPos]);
 
-  // pick the nearest shelter by distance
   useEffect(() => {
     if (!userPos || candidates.length === 0) return;
     const withDist = candidates.map((c) => ({ ...c, dist: haversineDistance(userPos, c.position) }));
@@ -265,7 +250,6 @@ export default function NavigatePage() {
     try { if (nearest) saveCached(CACHE_BEST_KEY, nearest); } catch (e) { /* ignore */ }
   }, [candidates, userPos]);
 
-  // request directions for the chosen mode whenever best changes or mode changes
   const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const [osrmRoute, setOsrmRoute] = useState<{ coords: { lat: number; lng: number }[]; duration: number; distance: number } | null>(null);
   const [routeSteps, setRouteSteps] = useState<any[]>([]);
@@ -290,7 +274,6 @@ export default function NavigatePage() {
           setOsrmRoute(null);
           const eta = res.routes[0].legs[0].duration?.value ?? null;
           setEtaSeconds(typeof eta === 'number' ? eta : null);
-          // build step list from Google Directions
           try {
             const gsteps = res.routes[0].legs[0].steps || [];
             const parsed = gsteps.map((s: any) => ({
@@ -304,7 +287,6 @@ export default function NavigatePage() {
             setRouteSteps([]);
           }
         } else {
-          // Directions request failed (e.g. REQUEST_DENIED) — try OSRM public routing as a fallback to get a street route
           setDirections(null);
           (async () => {
             try {
@@ -314,7 +296,6 @@ export default function NavigatePage() {
               const url = `https://router.project-osrm.org/route/v1/${profile}/${from};${to}?overview=full&geometries=geojson&steps=true`;
               const r = await fetch(url);
               if (!r.ok) {
-                // fallback to straight-line ETA
                 const distMeters = best?.dist ?? haversineDistance(userPos, best.position);
                 const walkSpeed = 5000 / 3600;
                 const driveSpeed = 50000 / 3600;
@@ -330,7 +311,6 @@ export default function NavigatePage() {
                 const coords = route.geometry.coordinates.map((c: any) => ({ lat: c[1], lng: c[0] }));
                 setOsrmRoute({ coords, duration: route.duration ?? 0, distance: route.distance ?? 0 });
                 setEtaSeconds(typeof route.duration === 'number' ? Math.round(route.duration) : null);
-                // parse OSRM steps if available
                 try {
                   const osrmLeg = jd.routes[0].legs && jd.routes[0].legs[0];
                   const osrmSteps = (osrmLeg && osrmLeg.steps) || [];
@@ -372,7 +352,6 @@ export default function NavigatePage() {
   }, [isLoaded, userPos, best, mode]);
 
   const center = useMemo(() => userPos ?? { lat: 50.06465, lng: 19.94498 }, [userPos]);
-  // determine current and next step from routeSteps and userPos
   const currentStepIndex = useMemo(() => {
     if (!userPos || !routeSteps || routeSteps.length === 0) return -1;
     let bestIdx = 0;
@@ -429,7 +408,6 @@ export default function NavigatePage() {
           {directions ? (
             <DirectionsRenderer directions={directions} />
           ) : osrmRoute ? (
-            // draw OSRM-provided street-following route (two-stroke for nicer visual)
             <>
               <Polyline path={osrmRoute.coords} options={{ strokeColor: '#ffffff', strokeOpacity: 0.9, strokeWeight: 10 }} />
               <Polyline path={osrmRoute.coords} options={{ strokeColor: '#1976d2', strokeOpacity: 0.95, strokeWeight: 6 }} />
