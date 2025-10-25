@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLoadScript, GoogleMap, Marker, DirectionsRenderer, Polyline } from "@react-google-maps/api";
+import { useLocation } from "react-router-dom";
 
 const ARCGIS_BASE =
   "https://services-eu1.arcgis.com/HE4WRthd9CIPj0R8/arcgis/rest/services/schrony_csv/FeatureServer/0/query";
@@ -145,6 +146,7 @@ export default function NavigatePage() {
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [candidates, setCandidates] = useState<any[]>([]);
   const [best, setBest] = useState<any | null>(null);
+  const location = useLocation();
   const [mode, setMode] = useState<'WALKING' | 'DRIVING'>('WALKING');
   const [directions, setDirections] = useState<any | null>(null);
 
@@ -175,6 +177,19 @@ export default function NavigatePage() {
       { enableHighAccuracy: true }
     );
   }, []);
+
+  useEffect(() => {
+    const t = (location.state as any)?.target;
+    if (t) {
+      setBest(t);
+      setCandidates((prev) => {
+        if (!prev || prev.length === 0) return [t];
+        const exists = prev.find((x: any) => x.id === t.id);
+        if (!exists) return [t, ...prev];
+        return prev;
+      });
+    }
+  }, [location.state]);
 
   useEffect(() => {
     if (!userPos) return;

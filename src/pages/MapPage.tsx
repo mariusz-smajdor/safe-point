@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLoadScript, GoogleMap, Marker } from "@react-google-maps/api";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 export default function MapPage() {
@@ -222,6 +223,8 @@ export default function MapPage() {
     return [];
   });
 
+  const navigate = useNavigate();
+
   useEffect(() => {
     if (markers && markers.length > 0) setVisibleMarkers(markers);
   }, [markers]);
@@ -336,7 +339,8 @@ export default function MapPage() {
                 icon = "/blue-marker.png";
               }
 
-              return <Marker key={m.id} position={m.position} icon={icon} />;
+              const titleText = m.raw?.Nazwa || m.raw?.Name || m.raw?.NAZWA || m.raw?.Adres || "Shelter";
+              return <Marker key={m.id} position={m.position} icon={icon} title={titleText} onClick={() => navigate('/navigate', { state: { target: m } })} />;
             })}
           </GoogleMap>
         )}
@@ -356,7 +360,7 @@ export default function MapPage() {
             const badge = badgeInfo(current, capacity);
 
             return (
-              <div key={m.id} style={{ display: "flex", gap: 12, padding: 12, borderBottom: "1px solid #f0f0f0" }}>
+              <div key={m.id} onClick={() => navigate('/navigate', { state: { target: m } })} onKeyDown={(e) => { if ((e as any).key === 'Enter') navigate('/navigate', { state: { target: m } }); }} role="button" tabIndex={0} style={{ display: "flex", gap: 12, padding: 12, borderBottom: "1px solid #f0f0f0", cursor: 'pointer' }}>
                 <div style={{ flex: "1 1 0" }}>
                   <div style={{ fontWeight: 600 }}>{title}</div>
                   <div style={{ color: "#666", fontSize: 13 }}>{street}</div>
